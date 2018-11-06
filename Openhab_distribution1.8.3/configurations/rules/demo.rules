@@ -1,0 +1,394 @@
+import org.openhab.core.library.types.*
+import org.openhab.core.persistence.*
+import org.openhab.model.script.actions.*
+import java.lang.Number
+import Java.util
+import java.lang.Math// gia to Math::exp
+import java.lang.Math.*
+import java.lang.Integer
+import java.lang.Double
+//import org.openhab.action.jfuzzylogic.*    
+//import com.fuzzylite.*
+//import com.fuzzylite.FuzzyLite
+//import com.fuzzylite.Op
+//import com.fuzzylite.defuzzifier.Centroid
+//import com.fuzzylite.imex.FldExporter
+//import com.fuzzylite.norm.s.Maximum
+//import com.fuzzylite.norm.t.Minimum
+//import com.fuzzylite.^rule.Rule
+//import com.fuzzylite.^rule.RuleBlock
+//import com.fuzzylite.term.Trapezoid
+//import com.fuzzylite.term.Triangle
+//import com.fuzzylite.variable.InputVariable
+//import com.fuzzylite.variable.OutputVariable
+
+import java.util.List
+import java.util.ArrayList
+
+
+
+
+
+var Number counter = 1
+var Timer timer = null
+  
+
+/**
+ * This is a demo rule which simulates a real dimmer by reacting to increase/decrease commands 
+ * and posting an updated state on the bus 
+ */
+rule "Dimmed Light"
+	when
+		Item DimmedLight received command
+	then
+		var Number percent = 0
+		if(DimmedLight.state instanceof DecimalType) percent = DimmedLight.state as DecimalType 
+			
+		if(receivedCommand==INCREASE) percent = percent + 5
+		if(receivedCommand==DECREASE) percent = percent - 5
+
+		if(percent<0)   percent = 0
+		if(percent>100) percent = 100
+		postUpdate(DimmedLight, percent);
+end
+
+
+/**
+ * This rule demonstrates how a NumberItem can be used to easily control the local sound system.
+ * A selection widget in the UI provides easy access for this
+ */
+rule "Select Radio Station"
+	when
+		Item Radio_Station received command
+	then
+		switch(receivedCommand) {
+			case 0 : playStream(null)
+			case 1 : playStream("http://metafiles.gl-systemhaus.de/hr/hr3_2.m3u")
+			case 2 : playStream("http://mp3-live.swr3.de/swr3_m.m3u")
+			case 3 : playStream("http://edge.live.mp3.mdn.newmedia.nacamar.net/radioffh/livestream.mp3.m3u")
+		}
+end
+
+
+/**
+ * This rules controls the volume on the local host
+ */
+rule "Volume control"
+	when
+		Item Volume received command
+	then
+		if(receivedCommand instanceof PercentType) {
+			setMasterVolume(receivedCommand as PercentType)
+		} else {
+			if(receivedCommand==INCREASE) increaseMasterVolume(20)
+			if(receivedCommand==DECREASE) decreaseMasterVolume(20)	
+		}
+		postUpdate(Volume, masterVolume * 100)
+end
+
+
+
+
+/**
+ * The following rules help initializing the demo items with some helpful states.
+ */
+rule "Initialize light states"
+	when
+		System started
+	then
+		Lights?.members.forEach(light|
+			postUpdate(light, if(Math::random > 0.7) ON else OFF)
+		)
+end
+
+
+
+rule "Initialize heating states"
+	when 
+		System started
+	then
+		Heating?.members.forEach(heating|
+			postUpdate(heating, if(Math::random > 0.8) ON else OFF)
+		)
+		postUpdate(Temperature_Setpoint, 22)
+end
+
+
+
+
+
+
+
+
+
+
+
+
+//Presense_configuration
+
+
+
+rule "Configure Presense_configuration"
+when 
+		Item Presense changed
+then
+var Number Presense_configuration_value=Presense.state as DecimalType
+	var Number new_Presense_configuration_value=Presense_configuration_value*(-1/10000)+1
+	postUpdate(Presense_configuration, new_Presense_configuration_value)
+end
+
+
+
+
+//read me first
+ //Sto Tr dinw timh idia me Ta dld thermokrasia
+
+
+
+//PMV rule
+
+rule "calculatePMV"
+when 
+		Item Temperature_thermistor changed or
+		Item RH changed 
+
+then
+
+//function calculatePMV(Ta, Tr, Vel, RH, CLO, MET, EW)   
+ //Definition of the function "PMV" by 7 factors
+  //
+  
+//  Ta  : Air Temperature,                [deg.C]
+// @Tr@: Mean Radiant Temperature, @    [deg.C]
+// @Vel : Relative Air Velocity,          [m/s]
+//  RH  : Relative Humidity,              [%]
+//  CLO : Clothing,                       [clo]
+//  MET : Metabolic Rate,                 [met]
+ 
+//  EW : External Work,                   [met] (=normally around 0)
+//  PA  : Water Vapor Pressure,          [Pa]
+
+
+val Number Vel=0.5//Vel : Relative Air Velocity,          [m/s]
+val Number CLO=0.35//CLO : Clothing,
+val Number MET=1.1// Metabolic Rate,                 [met]
+val Number EW=0// External Work,                   [met] (=normally around 0)
+var  flag=0 
+//logInfo ("infowar","flag = "+flag)
+//logInfo ("infowar","Vel = "+Vel)
+var Number RH_value=(RH.state as DecimalType)
+var Number Ta=(Temperature_thermistor.state as DecimalType) 
+var Number Tr=(Temperature_thermistor.state as DecimalType)
+
+//var Number RH_value=(RH.state as DecimalType)
+//var Number Ta=(Temperature_thermistor.state as DecimalType)
+//var Number Tr=(Temperature_thermistor.state as DecimalType)
+//logInfo ("infowar","RH_value = "+RH_value)
+var Number Esw=0
+var Number FCL=0
+var Number HC
+var Number quick=16.6536 - 4030.183 / (Ta + 235)
+//logInfo ("infowar","quick = "+quick)
+
+//var Number	PA=RH_value * 10 * Math::exp(java::math::BigDecimal::doubleValue(quick))
+var Number	PA=RH_value * 10 * Math::exp(quick.doubleValue)
+//logInfo ("infowar","PA = "+PA)
+
+
+  
+//Metabolic rate
+
+var Number M=MET * 58.15 //Metabolic Rate,[W/m2]
+
+var Number W=EW * 58.15  
+
+var Number MW=M-W  //internal heat production in the human body
+
+//Clothing
+var Number ICL =0.155*CLO //thermal insulation of the Clothing, [m2K/W]
+
+if(ICL<0.078){
+	 FCL= 1 + 1.29 * ICL
+	}
+else{
+	 FCL=1.05 + 0.645 * ICL
+	}
+	
+//convention
+var Number HCF=12.1 *Math::sqrt(Vel.doubleValue)//convective heat transfer coefficient by forced convection
+
+//logInfo ("infowar","HCF = "+HCF)
+var Number TaA=Ta+273 //air temperature in kelvin[K]
+var Number TrA=Tr + 273   
+
+
+
+//CALCULATE SURFACE TEMPERATURE OF CLOTHING BY ITERATION
+var Number TCLA= TaA + (35.5 - Ta) / (3.5 * (6.45 * ICL + 0.1))
+
+//first guess for surface temperature of clothing
+
+var Number P1= ICL * FCL //calculation term
+var Number P2=  P1 * 3.96 //calculation term
+var Number P3= 1 * 100 //calculation term
+var Number P4= P1 * TaA //calculation term
+//var Number P5=308.7 - 0.028 * MW + P2 * (TrA / 100) ^ 4 //calculation term
+var Number quickP5=TrA.doubleValue/100
+var Number P5=308.7 - 0.028 * MW + P2 *Math::pow(quickP5.doubleValue,4) //calculation term
+
+var Number XN = TCLA // 100
+var Number XF = XN
+var Number N = 0  //N: number of iterations
+var Number EPS = 0.00015  //stop criteria in iteration
+var Number quick2=0
+
+
+do{
+	XF = (XF + XN) / 2
+	//convective heat Transf. coeff. by natural convection
+	//TaA=java::math::BigDecimal::toBigInteger(TaA)
+	//XF =java::math::BigDecimal::toBigInteger(XF)
+	//logInfo ("infowar","XF = "+XF)
+	//logInfo ("infowar","TaA = "+TaA)
+	//var Number quick3=java::math::BigDecimal::toBigInteger(100 * XF - TaA)
+	var Number quick3=(100 * XF - TaA)
+	if(quick3>=0){
+	quick3=quick3
+	}
+	else{
+	quick3=-quick3
+	}
+	
+	
+	//var Number HCN = 2.38 * (quick3) ^ 0.25
+	var Number HCN = 2.38  *Math::pow(quick3.doubleValue,0.25)
+	//logInfo ("infowar","HCN = "+HCN)
+	
+	
+	
+	
+	if( HCF > HCN){
+		HC = HCF
+	}
+	else{
+		HC = HCN
+	}
+	//XN = (P5 + P4 * HC - P2 * XF ^ 4) / (100 + P3 * HC)
+	XN = (P5 + P4 * HC - P2 * Math::pow(XF.doubleValue,4.00)) / (100 + P3 * HC)
+    N = N + 1
+	 //logInfo ("infowar","XN = "+XN)
+	 //logInfo ("infowar","XF = "+XF)
+	 
+	// quick2 =java::math::BigDecimal::doubleValue(XN - XF)
+		 quick2 =(XN - XF)
+		 //vriskw to abs tou quick2
+			 if(quick2>=0){
+			quick2=quick2
+			}
+			else{
+			quick2=-quick2
+			}
+			
+		 //logInfo ("infowar","quick2 = "+quick2)
+	 
+	if(N > 150){
+		
+		var Number PMV_new_value= 999999
+		flag=1
+		postUpdate(PMV,PMV_new_value)
+	}
+	
+	
+}
+
+while((quick2 < EPS) && flag==0)
+//while((Math::abs(XN - XF) < EPS) && flag==0)
+if(flag==0){
+	var Number TCL = 100 * XN - 273 //surface temperature of the clothing
+	//HEAT LOSS COMPONENTS
+   //heat loss diff. through skin
+	var Number Ediff = 3.05 * 0.001 * (5733 - 6.99 * MW - PA)
+  //heat loss by sweating (comfort)
+
+	 if(MW>58.15){
+		 Esw = 0.42 * (MW - 58.15)
+	 } 
+	 else{
+		 Esw = 0
+	 }
+
+
+		//	latent respiration heat loss
+		var Number  LRES = 1.7 * 0.00001 * M * (5867 - PA)
+		
+		//dry respiration heat loss
+		var Number  DRES = 0.0014 * M * (34 - Ta)
+		
+		//heat loss by radiation
+		//var Number R = 3.96 * FCL * (XN ^ 4 - (TrA / 100) ^ 4)
+		var Number quickR=TrA/100.00
+		 
+		var Number R =3.96 * FCL * (Math::pow(XN.doubleValue,4.00) - Math::pow(quickR.doubleValue,4.00))
+			//heat loss by convection
+		var Number C = FCL * HC * (TCL-Ta)
+		
+		//CALCULATE PMV AND PPD 
+	  //Thermal sensation transer coefficient
+	  
+	      
+	 //var Number TS = 0.303 * Math::exp(java::math::BigDecimal::doubleValue(-0.036 * M) + 0.028)
+	   
+	  //var Number x=java.lang.Number.doubleValue(M)
+	
+	   var Number quickTS=(-0.036 * M) + 0.028
+	   var Number TS = 0.303 * Math::exp(quickTS.doubleValue)
+		 
+		
+		//Predicted Mean Vote
+	
+			var Number PMV_new_value1= TS * (MW - Ediff - Esw - LRES - DRES - R - C)
+			flag=0
+			postUpdate(PMV,PMV_new_value1)
+
+}// here closes if  flag==0		
+
+	end
+	
+	
+	
+	
+   
+
+		
+rule  " fuzzy staff"
+when
+		Item PMV changed or
+		Item  Temperature_thermistor changed		
+then
+	    
+		
+
+			
+	var Number PMV_value=(PMV.state as DecimalType)
+	var Number Tout_value=(Temperature_thermistor.state as DecimalType) 
+
+	
+	 
+	//val Number  MecVen=0 
+	//val Number x=-2.5 
+	//val Number y=18.0  
+	
+	 val vInParams = newArrayList(PMV_value.doubleValue,Tout_value.doubleValue)
+	
+
+  	   logInfo ("getinsane","vInParams"+vInParams)      
+	 logInfo ("infowar","mia grammi prin")
+	 var Number HVAC=doFuzzyLogic("PMVController",vInParams)
+	 logInfo ("infowar","HVAC = "+HVAC)
+	HVAC = Math::round(HVAC.floatValue)
+
+	logInfo ("infowar","HVAC2 = "+HVAC)
+	 postUpdate(HVACSETPOINTCHANGE,HVAC)
+    // postUpdate(Mechanicalventilationchange,OutParams(2)
+	 
+end
